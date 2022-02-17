@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1643294115099,
+  "lastUpdate": 1645106948671,
   "repoUrl": "https://github.com/prisma-korea/prisma",
   "entries": {
     "Benchmark.js Benchmark": [
@@ -75948,6 +75948,72 @@ window.BENCHMARK_DATA = {
           {
             "name": "@prisma/client size",
             "value": 13,
+            "range": "±0.00%",
+            "unit": "MB",
+            "extra": "1 samples"
+          },
+          {
+            "name": ".prisma/client size",
+            "value": 42,
+            "range": "±0.00%",
+            "unit": "MB",
+            "extra": "1 samples"
+          },
+          {
+            "name": ".prisma/client/index.d.ts size",
+            "value": 1.7,
+            "range": "±0.00%",
+            "unit": "MB",
+            "extra": "1 samples"
+          },
+          {
+            "name": ".prisma/client/index.js size",
+            "value": 3.1,
+            "range": "±0.00%",
+            "unit": "MB",
+            "extra": "1 samples"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "Jolg42@users.noreply.github.com",
+            "name": "Joël Galeran",
+            "username": "Jolg42"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "d1c0252adff0c096e29a41301c912718121dde7e",
+          "message": "chore(db pull): log how many embedded documents were introspected (#11874)",
+          "timestamp": "2022-02-17T13:55:54+01:00",
+          "tree_id": "7dcdf2ca81b9b7779d11b5b404e2180df1eed04a",
+          "url": "https://github.com/prisma-korea/prisma/commit/d1c0252adff0c096e29a41301c912718121dde7e"
+        },
+        "date": 1645106943502,
+        "tool": "benchmarkjs",
+        "benches": [
+          {
+            "name": "client generation ~50 Models",
+            "value": 0.63,
+            "range": "±6.47%",
+            "unit": "ops/sec",
+            "extra": "8 samples"
+          },
+          {
+            "name": "typescript compilation ~50 Models",
+            "value": 0.12,
+            "range": "±3.71%",
+            "unit": "ops/sec",
+            "extra": "5 samples"
+          },
+          {
+            "name": "@prisma/client size",
+            "value": 8.1,
             "range": "±0.00%",
             "unit": "MB",
             "extra": "1 samples"
