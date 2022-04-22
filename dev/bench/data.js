@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1650455885708,
+  "lastUpdate": 1650667994214,
   "repoUrl": "https://github.com/prisma-korea/prisma",
   "entries": {
     "Benchmark.js Benchmark": [
@@ -76668,6 +76668,72 @@ window.BENCHMARK_DATA = {
             "name": "typescript compilation ~50 Models",
             "value": 0.1,
             "range": "±3.78%",
+            "unit": "ops/sec",
+            "extra": "5 samples"
+          },
+          {
+            "name": "@prisma/client size",
+            "value": 8.4,
+            "range": "±0.00%",
+            "unit": "MB",
+            "extra": "1 samples"
+          },
+          {
+            "name": ".prisma/client size",
+            "value": 41,
+            "range": "±0.00%",
+            "unit": "MB",
+            "extra": "1 samples"
+          },
+          {
+            "name": ".prisma/client/index.d.ts size",
+            "value": 1.7,
+            "range": "±0.00%",
+            "unit": "MB",
+            "extra": "1 samples"
+          },
+          {
+            "name": ".prisma/client/index.js size",
+            "value": 3.1,
+            "range": "±0.00%",
+            "unit": "MB",
+            "extra": "1 samples"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "Jolg42@users.noreply.github.com",
+            "name": "Joël Galeran",
+            "username": "Jolg42"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "2bbe4eb2eb8dbd4b728d63c111c5dad20a41a78f",
+          "message": "chore(cli): refactor checkpoint call and sanitize options (#12908)",
+          "timestamp": "2022-04-22T14:56:20+02:00",
+          "tree_id": "1984663f52f6cf7d1a720565a38251e40d1b8f9f",
+          "url": "https://github.com/prisma-korea/prisma/commit/2bbe4eb2eb8dbd4b728d63c111c5dad20a41a78f"
+        },
+        "date": 1650667989438,
+        "tool": "benchmarkjs",
+        "benches": [
+          {
+            "name": "client generation ~50 Models",
+            "value": 0.38,
+            "range": "±5.77%",
+            "unit": "ops/sec",
+            "extra": "6 samples"
+          },
+          {
+            "name": "typescript compilation ~50 Models",
+            "value": 0.09,
+            "range": "±3.14%",
             "unit": "ops/sec",
             "extra": "5 samples"
           },
