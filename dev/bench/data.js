@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1652190042046,
+  "lastUpdate": 1652332822270,
   "repoUrl": "https://github.com/prisma-korea/prisma",
   "entries": {
     "Benchmark.js Benchmark": [
@@ -76932,6 +76932,72 @@ window.BENCHMARK_DATA = {
             "name": "typescript compilation ~50 Models",
             "value": 0.12,
             "range": "±3.15%",
+            "unit": "ops/sec",
+            "extra": "5 samples"
+          },
+          {
+            "name": "@prisma/client size",
+            "value": 8.4,
+            "range": "±0.00%",
+            "unit": "MB",
+            "extra": "1 samples"
+          },
+          {
+            "name": ".prisma/client size",
+            "value": 45,
+            "range": "±0.00%",
+            "unit": "MB",
+            "extra": "1 samples"
+          },
+          {
+            "name": ".prisma/client/index.d.ts size",
+            "value": 1.7,
+            "range": "±0.00%",
+            "unit": "MB",
+            "extra": "1 samples"
+          },
+          {
+            "name": ".prisma/client/index.js size",
+            "value": 3.1,
+            "range": "±0.00%",
+            "unit": "MB",
+            "extra": "1 samples"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "Jolg42@users.noreply.github.com",
+            "name": "Joël Galeran",
+            "username": "Jolg42"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "82cca7f3c74afefae62383e102e9b45f72632c5c",
+          "message": "chore(init): remove cockroachdb flag from init (#13298)\n\n* chore(init): remove cockroachdb flag from init\r\n\r\nand remove cockroachdb flag from tests/fixtures\r\n\r\n* snappppshots\r\n\r\n* one more snapshot",
+          "timestamp": "2022-05-11T20:32:55+02:00",
+          "tree_id": "c37313f08156cd4b71d66cc61edf014fddae8ca8",
+          "url": "https://github.com/prisma-korea/prisma/commit/82cca7f3c74afefae62383e102e9b45f72632c5c"
+        },
+        "date": 1652332817260,
+        "tool": "benchmarkjs",
+        "benches": [
+          {
+            "name": "client generation ~50 Models",
+            "value": 0.45,
+            "range": "±5.72%",
+            "unit": "ops/sec",
+            "extra": "7 samples"
+          },
+          {
+            "name": "typescript compilation ~50 Models",
+            "value": 0.11,
+            "range": "±3.99%",
             "unit": "ops/sec",
             "extra": "5 samples"
           },
