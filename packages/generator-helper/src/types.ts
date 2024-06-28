@@ -49,6 +49,7 @@ export interface GeneratorConfig {
   // TODO why is this not optional?
   previewFeatures: string[]
   envPaths?: EnvPaths
+  sourceFilePath: string
 }
 
 export interface EnvValue {
@@ -71,13 +72,17 @@ export type ConnectorType =
   | 'sqlserver'
   | 'cockroachdb'
 
+export type ActiveConnectorType = Exclude<ConnectorType, 'postgres'>
+
 export interface DataSource {
   name: string
   provider: ConnectorType
-  activeProvider: ConnectorType
+  // In Rust, this comes from `Connector::provider_name()`
+  activeProvider: ActiveConnectorType
   url: EnvValue
   directUrl?: EnvValue
   schemas: string[] | []
+  sourceFilePath: string
 }
 
 export type BinaryPaths = {
