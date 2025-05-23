@@ -1,9 +1,8 @@
-import { SpanKind } from '@opentelemetry/api'
 import { SqlQuery, SqlQueryable, SqlResultSet } from '@prisma/driver-adapter-utils'
 
 import { QueryEvent } from '../events'
 import { JoinExpression, Pagination, QueryPlanNode } from '../QueryPlan'
-import { providerToOtelSystem, type TracingHelper } from '../tracing'
+import { type TracingHelper, withQuerySpanAndEvent } from '../tracing'
 import { type TransactionManager } from '../transactionManager/TransactionManager'
 import { rethrowAsUserFacing } from '../UserFacingError'
 import { assertNever, doKeysMatch } from '../utils'
@@ -11,7 +10,7 @@ import { applyDataMap } from './DataMapper'
 import { GeneratorRegistry, GeneratorRegistrySnapshot } from './generators'
 import { renderQuery } from './renderQuery'
 import { PrismaObject, ScopeBindings, Value } from './scope'
-import { serializeSql } from './serializeSql'
+import { serializeRawSql, serializeSql } from './serializeSql'
 import { doesSatisfyRule, performValidation } from './validation'
 
 export type QueryInterpreterTransactionManager = { enabled: true; manager: TransactionManager } | { enabled: false }
@@ -22,6 +21,7 @@ export type QueryInterpreterOptions = {
   onQuery?: (event: QueryEvent) => void
   tracingHelper: TracingHelper
   serializer: (results: SqlResultSet) => Value
+  rawSerializer?: (results: SqlResultSet) => Value
 }
 
 export class QueryInterpreter {
@@ -31,13 +31,22 @@ export class QueryInterpreter {
   readonly #generators: GeneratorRegistry = new GeneratorRegistry()
   readonly #tracingHelper: TracingHelper
   readonly #serializer: (results: SqlResultSet) => Value
+  readonly #rawSerializer: (results: SqlResultSet) => Value
 
-  constructor({ transactionManager, placeholderValues, onQuery, tracingHelper, serializer }: QueryInterpreterOptions) {
+  constructor({
+    transactionManager,
+    placeholderValues,
+    onQuery,
+    tracingHelper,
+    serializer,
+    rawSerializer,
+  }: QueryInterpreterOptions) {
     this.#transactionManager = transactionManager
     this.#placeholderValues = placeholderValues
     this.#onQuery = onQuery
     this.#tracingHelper = tracingHelper
     this.#serializer = serializer
+    this.#rawSerializer = rawSerializer ?? serializer
   }
 
   static forSql(options: {
@@ -52,6 +61,7 @@ export class QueryInterpreter {
       onQuery: options.onQuery,
       tracingHelper: options.tracingHelper,
       serializer: serializeSql,
+      rawSerializer: serializeRawSql,
     })
   }
 
@@ -110,15 +120,19 @@ export class QueryInterpreter {
 
       case 'execute': {
         const query = renderQuery(node.args, scope, generators)
-        return this.#withQueryEvent(query, queryable, async () => {
+        return this.#withQuerySpanAndEvent(query, queryable, async () => {
           return await queryable.executeRaw(query)
         })
       }
 
       case 'query': {
         const query = renderQuery(node.args, scope, generators)
-        return this.#withQueryEvent(query, queryable, async () => {
-          return this.#serializer(await queryable.queryRaw(query))
+        return this.#withQuerySpanAndEvent(query, queryable, async () => {
+          if (node.args.type === 'rawSql') {
+            return this.#rawSerializer(await queryable.queryRaw(query))
+          } else {
+            return this.#serializer(await queryable.queryRaw(query))
+          }
         })
       }
 
@@ -268,32 +282,14 @@ export class QueryInterpreter {
     }
   }
 
-  #withQueryEvent<T>(query: SqlQuery, queryable: SqlQueryable, execute: () => Promise<T>): Promise<T> {
-    return this.#tracingHelper.runInChildSpan(
-      {
-        name: 'db_query',
-        kind: SpanKind.CLIENT,
-        attributes: {
-          'db.query.text': query.sql,
-          'db.system.name': providerToOtelSystem(queryable.provider),
-        },
-      },
-      async () => {
-        const timestamp = new Date()
-        const startInstant = performance.now()
-        const result = await execute()
-        const endInstant = performance.now()
-
-        this.#onQuery?.({
-          timestamp,
-          duration: endInstant - startInstant,
-          query: query.sql,
-          params: query.args,
-        })
-
-        return result
-      },
-    )
+  #withQuerySpanAndEvent<T>(query: SqlQuery, queryable: SqlQueryable, execute: () => Promise<T>): Promise<T> {
+    return withQuerySpanAndEvent({
+      query,
+      queryable,
+      execute,
+      tracingHelper: this.#tracingHelper,
+      onQuery: this.#onQuery,
+    })
   }
 }
 

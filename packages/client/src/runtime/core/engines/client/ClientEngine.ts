@@ -11,12 +11,13 @@ import {
   QueryInterpreter,
   QueryInterpreterTransactionManager,
   QueryPlanNode,
+  safeJsonStringify,
   TransactionInfo,
   TransactionManager,
   UserFacingError,
 } from '@prisma/client-engine-runtime'
 import { Debug } from '@prisma/debug'
-import { Provider, type SqlDriverAdapter } from '@prisma/driver-adapter-utils'
+import type { IsolationLevel as SqlIsolationLevel, Provider, SqlDriverAdapter } from '@prisma/driver-adapter-utils'
 import { assertNever, TracingHelper } from '@prisma/internals'
 
 import { version as clientVersion } from '../../../../../package.json'
@@ -124,7 +125,7 @@ export class ClientEngine implements Engine<undefined> {
         this.logEmitter.emit('query', {
           ...event,
           // TODO: we should probably change the interface to contain a proper array in the next major version.
-          params: JSON.stringify(event.params),
+          params: safeJsonStringify(event.params),
           // TODO: this field only exists for historical reasons as we grandfathered it from the time
           // when we emitted `tracing` events to stdout in the engine unchanged, and then described
           // them in the public API as TS types. Thus this field used to contain the name of the Rust
@@ -140,8 +141,12 @@ export class ClientEngine implements Engine<undefined> {
     this.transactionManagerPromise = this.adapterPromise.then((driverAdapter) => {
       return new TransactionManager({
         driverAdapter,
-        transactionOptions: this.config.transactionOptions,
+        transactionOptions: {
+          ...this.config.transactionOptions,
+          isolationLevel: this.#convertIsolationLevel(this.config.transactionOptions.isolationLevel),
+        },
         tracingHelper: this.tracingHelper,
+        onQuery: this.#emitQueryEvent,
       })
     })
 
@@ -301,7 +306,10 @@ export class ClientEngine implements Engine<undefined> {
     try {
       if (action === 'start') {
         const options: Tx.Options = arg
-        result = await transactionManager.startTransaction(options)
+        result = await transactionManager.startTransaction({
+          ...options,
+          isolationLevel: this.#convertIsolationLevel(options.isolationLevel),
+        })
       } else if (action === 'commit') {
         const txInfo: Tx.InteractiveTransactionInfo<undefined> = arg
         await transactionManager.commitTransaction(txInfo.id)
@@ -495,6 +503,36 @@ export class ClientEngine implements Engine<undefined> {
         return { data: { [action]: Object.fromEntries(selected) } }
       }
     })
+  }
+
+  #convertIsolationLevel(clientIsolationLevel: Tx.IsolationLevel | undefined): SqlIsolationLevel | undefined {
+    switch (clientIsolationLevel) {
+      case undefined:
+        return undefined
+      case 'ReadUncommitted':
+        return 'READ UNCOMMITTED'
+      case 'ReadCommitted':
+        return 'READ COMMITTED'
+      case 'RepeatableRead':
+        return 'REPEATABLE READ'
+      case 'Serializable':
+        return 'SERIALIZABLE'
+      case 'Snapshot':
+        return 'SNAPSHOT'
+      default:
+        throw new PrismaClientKnownRequestError(
+          `Inconsistent column data: Conversion failed: Invalid isolation level \`${
+            clientIsolationLevel satisfies never
+          }\``,
+          {
+            code: 'P2023',
+            clientVersion: this.config.clientVersion,
+            meta: {
+              providedIsolationLevel: clientIsolationLevel,
+            },
+          },
+        )
+    }
   }
 }
 
