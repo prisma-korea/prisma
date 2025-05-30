@@ -52,11 +52,15 @@ export type PrismaValueType =
   | { type: 'Boolean' }
   | { type: 'Decimal' }
   | { type: 'Date' }
+  | { type: 'Time' }
   | { type: 'Array'; inner: PrismaValueType }
   | { type: 'Object' }
   | { type: 'Bytes' }
 
 export type ResultNode =
+  | {
+      type: 'AffectedRows'
+    }
   | {
       type: 'Object'
       fields: Record<string, ResultNode>
@@ -219,6 +223,13 @@ export type QueryPlanNode =
       args: {
         expr: QueryPlanNode
         pagination: Pagination
+      }
+    }
+  | {
+      type: 'extendRecord'
+      args: {
+        expr: QueryPlanNode
+        values: Record<string, { type: 'value'; value: PrismaValue } | { type: 'lastInsertId' }>
       }
     }
 
