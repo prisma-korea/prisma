@@ -2,6 +2,7 @@
 
 import Debug from '@prisma/debug'
 import { enginesVersion } from '@prisma/engines'
+import { download } from '@prisma/fetch-engine'
 import { arg, handlePanic, HelpError, isCurrentBinInstalledGlobally, isError, isRustPanic } from '@prisma/internals'
 import {
   DbCommand,
@@ -55,9 +56,14 @@ const commandArray = process.argv.slice(2)
 
 process.removeAllListeners('warning')
 
-// Listen to Ctr + C and exit
 process.once('SIGINT', () => {
-  process.exit(130)
+  process.exitCode = 130
+
+  // no further downstream listeners for SIGINT, exit immediately with the code set above.
+  if (process.listenerCount('SIGINT') === 0) {
+    process.exit()
+  }
+  // otherwise, let the downstream listeners handle it.
 })
 
 // Parse CLI arguments
@@ -156,10 +162,14 @@ async function main(): Promise<number> {
       debug: DebugInfo.new(),
       // TODO: add rules subcommand to --help after EA
       rules: new SubCommand('@prisma/cli-security-rules'),
-      // TODO: add dev subcommand to --help after it works.
       dev: new SubCommand('@prisma/cli-dev'),
+      // TODO: add deploy subcommand to --help after it works.
+      deploy: new SubCommand('@prisma/cli-deploy'),
+      // TODO: add login subcommand to --help after it works.
+      login: new SubCommand('@prisma/cli-login'),
     },
     ['version', 'init', 'migrate', 'db', 'introspect', 'studio', 'generate', 'validate', 'format', 'telemetry'],
+    download,
   )
 
   await loadOrInitializeCommandState().catch((err) => {

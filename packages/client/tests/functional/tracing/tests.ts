@@ -325,7 +325,11 @@ testMatrix.setupTestSuite(
     }
 
     function detectPlatform() {
-      if (clientRuntime === 'wasm' || engineType === ClientEngineType.Client) {
+      if (
+        clientRuntime === 'wasm-engine-edge' ||
+        clientRuntime === 'wasm-compiler-edge' ||
+        engineType === ClientEngineType.Client
+      ) {
         return []
       }
       return [{ name: 'prisma:client:detect_platform' }]
@@ -388,6 +392,8 @@ testMatrix.setupTestSuite(
           ? [...engineConnection(), txSetIsolationLevel(), txBegin()]
           : driverAdapter === undefined
           ? [...engineConnection(), txBegin()]
+          : engineType === ClientEngineType.Client
+          ? undefined
           : engineConnection()
       } else if (operation === 'commit') {
         children = isMongoDb ? undefined : [txCommit()]
