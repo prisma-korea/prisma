@@ -52,11 +52,16 @@ export type PrismaValueType =
   | { type: 'Boolean' }
   | { type: 'Decimal' }
   | { type: 'Date' }
+  | { type: 'Time' }
   | { type: 'Array'; inner: PrismaValueType }
   | { type: 'Object' }
   | { type: 'Bytes' }
+  | { type: 'Enum'; inner: string }
 
 export type ResultNode =
+  | {
+      type: 'AffectedRows'
+    }
   | {
       type: 'Object'
       fields: Record<string, ResultNode>
@@ -87,10 +92,16 @@ export type QueryPlanDbQuery =
     }
 
 export type Fragment =
-  | { type: 'stringChunk'; value: string }
+  | { type: 'stringChunk'; chunk: string }
   | { type: 'parameter' }
   | { type: 'parameterTuple' }
-  | { type: 'parameterTupleList' }
+  | {
+      type: 'parameterTupleList'
+      itemPrefix: string
+      itemSeparator: string
+      itemSuffix: string
+      groupSeparator: string
+    }
 
 export interface PlaceholderFormat {
   prefix: string
@@ -105,6 +116,10 @@ export type JoinExpression = {
 }
 
 export type QueryPlanNode =
+  | {
+      type: 'value'
+      args: PrismaValue
+    }
   | {
       type: 'seq'
       args: QueryPlanNode[]
@@ -179,6 +194,7 @@ export type QueryPlanNode =
       args: {
         expr: QueryPlanNode
         structure: ResultNode
+        enums: Record<string, Record<string, string>>
       }
     }
   | {
@@ -221,6 +237,29 @@ export type QueryPlanNode =
         pagination: Pagination
       }
     }
+  | {
+      type: 'initializeRecord'
+      args: {
+        expr: QueryPlanNode
+        fields: Record<string, FieldInitializer>
+      }
+    }
+  | {
+      type: 'mapRecord'
+      args: {
+        expr: QueryPlanNode
+        fields: Record<string, FieldOperation>
+      }
+    }
+
+export type FieldInitializer = { type: 'value'; value: PrismaValue } | { type: 'lastInsertId' }
+
+export type FieldOperation =
+  | { type: 'set'; value: PrismaValue }
+  | { type: 'add'; value: PrismaValue }
+  | { type: 'subtract'; value: PrismaValue }
+  | { type: 'multiply'; value: PrismaValue }
+  | { type: 'divide'; value: PrismaValue }
 
 export type Pagination = {
   cursor: Record<string, PrismaValue> | null

@@ -1,17 +1,16 @@
-import { SpanKind } from '@opentelemetry/api'
 import { SqlQuery, SqlQueryable, SqlResultSet } from '@prisma/driver-adapter-utils'
 
 import { QueryEvent } from '../events'
-import { JoinExpression, Pagination, QueryPlanNode } from '../QueryPlan'
-import { providerToOtelSystem, type TracingHelper } from '../tracing'
+import { FieldInitializer, FieldOperation, JoinExpression, Pagination, QueryPlanNode } from '../QueryPlan'
+import { type TracingHelper, withQuerySpanAndEvent } from '../tracing'
 import { type TransactionManager } from '../transactionManager/TransactionManager'
 import { rethrowAsUserFacing } from '../UserFacingError'
 import { assertNever, doKeysMatch } from '../utils'
 import { applyDataMap } from './DataMapper'
 import { GeneratorRegistry, GeneratorRegistrySnapshot } from './generators'
-import { renderQuery } from './renderQuery'
+import { evaluateParam, renderQuery } from './renderQuery'
 import { PrismaObject, ScopeBindings, Value } from './scope'
-import { serializeSql } from './serializeSql'
+import { serializeRawSql, serializeSql } from './serializeSql'
 import { doesSatisfyRule, performValidation } from './validation'
 
 export type QueryInterpreterTransactionManager = { enabled: true; manager: TransactionManager } | { enabled: false }
@@ -22,6 +21,7 @@ export type QueryInterpreterOptions = {
   onQuery?: (event: QueryEvent) => void
   tracingHelper: TracingHelper
   serializer: (results: SqlResultSet) => Value
+  rawSerializer?: (results: SqlResultSet) => Value
 }
 
 export class QueryInterpreter {
@@ -31,13 +31,22 @@ export class QueryInterpreter {
   readonly #generators: GeneratorRegistry = new GeneratorRegistry()
   readonly #tracingHelper: TracingHelper
   readonly #serializer: (results: SqlResultSet) => Value
+  readonly #rawSerializer: (results: SqlResultSet) => Value
 
-  constructor({ transactionManager, placeholderValues, onQuery, tracingHelper, serializer }: QueryInterpreterOptions) {
+  constructor({
+    transactionManager,
+    placeholderValues,
+    onQuery,
+    tracingHelper,
+    serializer,
+    rawSerializer,
+  }: QueryInterpreterOptions) {
     this.#transactionManager = transactionManager
     this.#placeholderValues = placeholderValues
     this.#onQuery = onQuery
     this.#tracingHelper = tracingHelper
     this.#serializer = serializer
+    this.#rawSerializer = rawSerializer ?? serializer
   }
 
   static forSql(options: {
@@ -52,13 +61,19 @@ export class QueryInterpreter {
       onQuery: options.onQuery,
       tracingHelper: options.tracingHelper,
       serializer: serializeSql,
+      rawSerializer: serializeRawSql,
     })
   }
 
   async run(queryPlan: QueryPlanNode, queryable: SqlQueryable): Promise<unknown> {
-    return this.interpretNode(queryPlan, queryable, this.#placeholderValues, this.#generators.snapshot()).catch((e) =>
-      rethrowAsUserFacing(e),
-    )
+    const { value } = await this.interpretNode(
+      queryPlan,
+      queryable,
+      this.#placeholderValues,
+      this.#generators.snapshot(queryable.provider),
+    ).catch((e) => rethrowAsUserFacing(e))
+
+    return value
   }
 
   private async interpretNode(
@@ -66,24 +81,29 @@ export class QueryInterpreter {
     queryable: SqlQueryable,
     scope: ScopeBindings,
     generators: GeneratorRegistrySnapshot,
-  ): Promise<Value> {
+  ): Promise<IntermediateValue> {
     switch (node.type) {
+      case 'value': {
+        return { value: evaluateParam(node.args, scope, generators) }
+      }
+
       case 'seq': {
-        let result: Value
+        let result: IntermediateValue | undefined
         for (const arg of node.args) {
           result = await this.interpretNode(arg, queryable, scope, generators)
         }
-        return result
+        return result ?? { value: undefined }
       }
 
       case 'get': {
-        return scope[node.args.name]
+        return { value: scope[node.args.name] }
       }
 
       case 'let': {
         const nestedScope: ScopeBindings = Object.create(scope)
         for (const binding of node.args.bindings) {
-          nestedScope[binding.name] = await this.interpretNode(binding.expr, queryable, nestedScope, generators)
+          const { value } = await this.interpretNode(binding.expr, queryable, nestedScope, generators)
+          nestedScope[binding.name] = value
         }
         return this.interpretNode(node.args.expr, queryable, nestedScope, generators)
       }
@@ -92,76 +112,89 @@ export class QueryInterpreter {
         for (const name of node.args.names) {
           const value = scope[name]
           if (!isEmpty(value)) {
-            return value
+            return { value }
           }
         }
-        return []
+        return { value: [] }
       }
 
       case 'concat': {
-        const parts = await Promise.all(node.args.map((arg) => this.interpretNode(arg, queryable, scope, generators)))
-        return parts.length > 0 ? parts.reduce<Value[]>((acc, part) => acc.concat(asList(part)), []) : []
+        const parts = await Promise.all(
+          node.args.map((arg) => this.interpretNode(arg, queryable, scope, generators).then((res) => res.value)),
+        )
+        return {
+          value: parts.length > 0 ? parts.reduce<Value[]>((acc, part) => acc.concat(asList(part)), []) : [],
+        }
       }
 
       case 'sum': {
-        const parts = await Promise.all(node.args.map((arg) => this.interpretNode(arg, queryable, scope, generators)))
-        return parts.length > 0 ? parts.reduce((acc, part) => asNumber(acc) + asNumber(part)) : 0
+        const parts = await Promise.all(
+          node.args.map((arg) => this.interpretNode(arg, queryable, scope, generators).then((res) => res.value)),
+        )
+        return {
+          value: parts.length > 0 ? parts.reduce((acc, part) => asNumber(acc) + asNumber(part)) : 0,
+        }
       }
 
       case 'execute': {
         const query = renderQuery(node.args, scope, generators)
-        return this.#withQueryEvent(query, queryable, async () => {
-          return await queryable.executeRaw(query)
+        return this.#withQuerySpanAndEvent(query, queryable, async () => {
+          return { value: await queryable.executeRaw(query) }
         })
       }
 
       case 'query': {
         const query = renderQuery(node.args, scope, generators)
-        return this.#withQueryEvent(query, queryable, async () => {
-          return this.#serializer(await queryable.queryRaw(query))
+        return this.#withQuerySpanAndEvent(query, queryable, async () => {
+          const result = await queryable.queryRaw(query)
+          if (node.args.type === 'rawSql') {
+            return { value: this.#rawSerializer(result), lastInsertId: result.lastInsertId }
+          } else {
+            return { value: this.#serializer(result), lastInsertId: result.lastInsertId }
+          }
         })
       }
 
       case 'reverse': {
-        const value = await this.interpretNode(node.args, queryable, scope, generators)
-        return Array.isArray(value) ? value.reverse() : value
+        const { value, lastInsertId } = await this.interpretNode(node.args, queryable, scope, generators)
+        return { value: Array.isArray(value) ? value.reverse() : value, lastInsertId }
       }
 
       case 'unique': {
-        const value = await this.interpretNode(node.args, queryable, scope, generators)
+        const { value, lastInsertId } = await this.interpretNode(node.args, queryable, scope, generators)
         if (!Array.isArray(value)) {
-          return value
+          return { value, lastInsertId }
         }
         if (value.length > 1) {
           throw new Error(`Expected zero or one element, got ${value.length}`)
         }
-        return value[0] ?? null
+        return { value: value[0] ?? null, lastInsertId }
       }
 
       case 'required': {
-        const value = await this.interpretNode(node.args, queryable, scope, generators)
+        const { value, lastInsertId } = await this.interpretNode(node.args, queryable, scope, generators)
         if (isEmpty(value)) {
           throw new Error('Required value is empty')
         }
-        return value
+        return { value, lastInsertId }
       }
 
       case 'mapField': {
-        const value = await this.interpretNode(node.args.records, queryable, scope, generators)
-        return mapField(value, node.args.field)
+        const { value, lastInsertId } = await this.interpretNode(node.args.records, queryable, scope, generators)
+        return { value: mapField(value, node.args.field), lastInsertId }
       }
 
       case 'join': {
-        const parent = await this.interpretNode(node.args.parent, queryable, scope, generators)
+        const { value: parent, lastInsertId } = await this.interpretNode(node.args.parent, queryable, scope, generators)
 
         if (parent === null) {
-          return null
+          return { value: null, lastInsertId }
         }
 
         const children = (await Promise.all(
           node.args.children.map(async (joinExpr) => ({
             joinExpr,
-            childRecords: await this.interpretNode(joinExpr.child, queryable, scope, generators),
+            childRecords: (await this.interpretNode(joinExpr.child, queryable, scope, generators)).value,
           })),
         )) satisfies JoinExpressionWithRecords[]
 
@@ -169,10 +202,10 @@ export class QueryInterpreter {
           for (const record of parent) {
             attachChildrenToParent(asRecord(record), children)
           }
-          return parent
+          return { value: parent, lastInsertId }
         }
 
-        return attachChildrenToParent(asRecord(parent), children)
+        return { value: attachChildrenToParent(asRecord(parent), children), lastInsertId }
       }
 
       case 'transaction': {
@@ -194,19 +227,19 @@ export class QueryInterpreter {
       }
 
       case 'dataMap': {
-        const data = await this.interpretNode(node.args.expr, queryable, scope, generators)
-        return applyDataMap(data, node.args.structure)
+        const { value, lastInsertId } = await this.interpretNode(node.args.expr, queryable, scope, generators)
+        return { value: applyDataMap(value, node.args.structure, node.args.enums), lastInsertId }
       }
 
       case 'validate': {
-        const data = await this.interpretNode(node.args.expr, queryable, scope, generators)
-        performValidation(data, node.args.rules, node.args)
+        const { value, lastInsertId } = await this.interpretNode(node.args.expr, queryable, scope, generators)
+        performValidation(value, node.args.rules, node.args)
 
-        return data
+        return { value, lastInsertId }
       }
 
       case 'if': {
-        const value = await this.interpretNode(node.args.value, queryable, scope, generators)
+        const { value } = await this.interpretNode(node.args.value, queryable, scope, generators)
         if (doesSatisfyRule(value, node.args.rule)) {
           return await this.interpretNode(node.args.then, queryable, scope, generators)
         } else {
@@ -215,18 +248,18 @@ export class QueryInterpreter {
       }
 
       case 'unit': {
-        return undefined
+        return { value: undefined }
       }
 
       case 'diff': {
-        const from = await this.interpretNode(node.args.from, queryable, scope, generators)
-        const to = await this.interpretNode(node.args.to, queryable, scope, generators)
+        const { value: from } = await this.interpretNode(node.args.from, queryable, scope, generators)
+        const { value: to } = await this.interpretNode(node.args.to, queryable, scope, generators)
         const toSet = new Set(asList(to))
-        return asList(from).filter((item) => !toSet.has(item))
+        return { value: asList(from).filter((item) => !toSet.has(item)) }
       }
 
       case 'distinctBy': {
-        const value = await this.interpretNode(node.args.expr, queryable, scope, generators)
+        const { value, lastInsertId } = await this.interpretNode(node.args.expr, queryable, scope, generators)
         const seen = new Set()
         const result: Value[] = []
         for (const item of asList(value)) {
@@ -236,11 +269,11 @@ export class QueryInterpreter {
             result.push(item)
           }
         }
-        return result
+        return { value: result, lastInsertId }
       }
 
       case 'paginate': {
-        const value = await this.interpretNode(node.args.expr, queryable, scope, generators)
+        const { value, lastInsertId } = await this.interpretNode(node.args.expr, queryable, scope, generators)
         const list = asList(value)
 
         const linkingFields = node.args.pagination.linkingFields
@@ -257,10 +290,33 @@ export class QueryInterpreter {
           const groupList = Array.from(groupedByParent.entries())
           groupList.sort(([aId], [bId]) => (aId < bId ? -1 : aId > bId ? 1 : 0))
 
-          return groupList.flatMap(([, elems]) => paginate(elems as {}[], node.args.pagination))
+          return {
+            value: groupList.flatMap(([, elems]) => paginate(elems as {}[], node.args.pagination)),
+            lastInsertId,
+          }
         }
 
-        return paginate(list as {}[], node.args.pagination)
+        return { value: paginate(list as {}[], node.args.pagination), lastInsertId }
+      }
+
+      case 'initializeRecord': {
+        const { lastInsertId } = await this.interpretNode(node.args.expr, queryable, scope, generators)
+
+        const record = {}
+        for (const [key, initializer] of Object.entries(node.args.fields)) {
+          record[key] = evalFieldInitializer(initializer, lastInsertId, scope, generators)
+        }
+        return { value: record, lastInsertId }
+      }
+
+      case 'mapRecord': {
+        const { value, lastInsertId } = await this.interpretNode(node.args.expr, queryable, scope, generators)
+
+        const record = value === null ? {} : asRecord(value)
+        for (const [key, entry] of Object.entries(node.args.fields)) {
+          record[key] = evalFieldOperation(entry, record[key], scope, generators)
+        }
+        return { value: record, lastInsertId }
       }
 
       default:
@@ -268,34 +324,18 @@ export class QueryInterpreter {
     }
   }
 
-  #withQueryEvent<T>(query: SqlQuery, queryable: SqlQueryable, execute: () => Promise<T>): Promise<T> {
-    return this.#tracingHelper.runInChildSpan(
-      {
-        name: 'db_query',
-        kind: SpanKind.CLIENT,
-        attributes: {
-          'db.query.text': query.sql,
-          'db.system.name': providerToOtelSystem(queryable.provider),
-        },
-      },
-      async () => {
-        const timestamp = new Date()
-        const startInstant = performance.now()
-        const result = await execute()
-        const endInstant = performance.now()
-
-        this.#onQuery?.({
-          timestamp,
-          duration: endInstant - startInstant,
-          query: query.sql,
-          params: query.args,
-        })
-
-        return result
-      },
-    )
+  #withQuerySpanAndEvent<T>(query: SqlQuery, queryable: SqlQueryable, execute: () => Promise<T>): Promise<T> {
+    return withQuerySpanAndEvent({
+      query,
+      queryable,
+      execute,
+      tracingHelper: this.#tracingHelper,
+      onQuery: this.#onQuery,
+    })
   }
 }
+
+type IntermediateValue = { value: Value; lastInsertId?: string }
 
 function isEmpty(value: Value): boolean {
   if (Array.isArray(value)) {
@@ -397,4 +437,52 @@ function paginate(list: {}[], { cursor, skip, take }: Pagination): {}[] {
  */
 function getRecordKey(record: {}, fields: string[]): string {
   return JSON.stringify(fields.map((field) => record[field]))
+}
+
+function evalFieldInitializer(
+  initializer: FieldInitializer,
+  lastInsertId: string | undefined,
+  scope: ScopeBindings,
+  generators: GeneratorRegistrySnapshot,
+): Value {
+  switch (initializer.type) {
+    case 'value':
+      return evaluateParam(initializer.value, scope, generators)
+    case 'lastInsertId':
+      return lastInsertId
+    default:
+      assertNever(initializer, `Unexpected field initializer type: ${initializer['type']}`)
+  }
+}
+
+function evalFieldOperation(
+  op: FieldOperation,
+  value: Value,
+  scope: ScopeBindings,
+  generators: GeneratorRegistrySnapshot,
+): Value {
+  switch (op.type) {
+    case 'set':
+      return evaluateParam(op.value, scope, generators)
+    case 'add':
+      return asNumber(value) + asNumber(evaluateParam(op.value, scope, generators))
+    case 'subtract':
+      return asNumber(value) - asNumber(evaluateParam(op.value, scope, generators))
+    case 'multiply':
+      return asNumber(value) * asNumber(evaluateParam(op.value, scope, generators))
+    case 'divide': {
+      const lhs = asNumber(value)
+      const rhs = asNumber(evaluateParam(op.value, scope, generators))
+      // SQLite and older versions of MySQL return NULL for division by zero, so we emulate
+      // that behavior here.
+      // If the database does not permit division by zero, a database error should be raised,
+      // preventing this case from being executed.
+      if (rhs === 0) {
+        return null
+      }
+      return lhs / rhs
+    }
+    default:
+      assertNever(op, `Unexpected field operation type: ${op['type']}`)
+  }
 }
