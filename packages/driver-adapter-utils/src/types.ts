@@ -100,11 +100,11 @@ export type Error =
     }
   | {
       kind: 'UniqueConstraintViolation'
-      fields: string[]
+      constraint?: { fields: string[] } | { index: string } | { foreignKey: {} }
     }
   | {
       kind: 'NullConstraintViolation'
-      fields: string[]
+      constraint?: { fields: string[] } | { index: string } | { foreignKey: {} }
     }
   | {
       kind: 'ForeignKeyConstraintViolation'
@@ -142,7 +142,22 @@ export type Error =
       cause: string
     }
   | {
+      kind: 'ValueOutOfRange'
+      cause: string
+    }
+  | {
+      kind: 'MissingFullTextSearchIndex'
+    }
+  | {
       kind: 'SocketTimeout'
+    }
+  | {
+      kind: 'InconsistentColumnData'
+      cause: string
+    }
+  | {
+      kind: 'TransactionAlreadyClosed'
+      cause: string
     }
   | {
       kind: 'postgres'
@@ -167,25 +182,33 @@ export type Error =
       extendedCode: number
       message: string
     }
+  | {
+      kind: 'mssql'
+      code: number
+      message: string
+    }
 
 export type ConnectionInfo = {
   schemaName?: string
   maxBindValues?: number
+  supportsRelationJoins: boolean
 }
 
-export type Provider = 'mysql' | 'postgres' | 'sqlite'
+export type Provider = 'mysql' | 'postgres' | 'sqlite' | 'sqlserver'
 
 // Current list of official Prisma adapters
 // This list might get outdated over time.
-// It's only used for auto-completion.
+// It's only used for auto-completion and tests.
 const officialPrismaAdapters = [
   '@prisma/adapter-planetscale',
   '@prisma/adapter-neon',
   '@prisma/adapter-libsql',
   '@prisma/adapter-d1',
   '@prisma/adapter-pg',
-  '@prisma/adapter-pg-worker',
+  '@prisma/adapter-mssql',
 ] as const
+
+export type OfficialDriverAdapterName = (typeof officialPrismaAdapters)[number]
 
 /**
  * A generic driver adapter factory that allows the user to instantiate a
