@@ -140,7 +140,7 @@
       "brotli": false
     },
     {
-      "path": "packages/client/runtime/wasm.js",
+      "path": "packages/client/runtime/wasm-engine-edge.js",
       "gzip": false,
       "brotli": false
     },
@@ -181,11 +181,6 @@
     },
     {
       "path": "packages/bundle-size/da-workers-pg/output.tgz",
-      "gzip": false,
-      "brotli": false
-    },
-    {
-      "path": "packages/bundle-size/da-workers-pg-worker/output.tgz",
       "gzip": false,
       "brotli": false
     },
