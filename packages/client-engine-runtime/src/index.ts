@@ -6,9 +6,10 @@ export {
   type QueryInterpreterTransactionManager,
 } from './interpreter/QueryInterpreter'
 export * from './QueryPlan'
+export type { SchemaProvider } from './schema'
 export { noopTracingHelper, type TracingHelper } from './tracing'
 export type { TransactionInfo, Options as TransactionOptions } from './transactionManager/Transaction'
 export { TransactionManager } from './transactionManager/TransactionManager'
 export { TransactionManagerError } from './transactionManager/TransactionManagerErrors'
 export { UserFacingError } from './UserFacingError'
-export { doKeysMatch, isDeepStrictEqual } from './utils'
+export { doKeysMatch, isDeepStrictEqual, safeJsonStringify } from './utils'

@@ -39,7 +39,11 @@ function evaluateParams(params: PrismaValue[], scope: ScopeBindings, generators:
   return params.map((param) => evaluateParam(param, scope, generators))
 }
 
-function evaluateParam(param: PrismaValue, scope: ScopeBindings, generators: GeneratorRegistrySnapshot): unknown {
+export function evaluateParam(
+  param: PrismaValue,
+  scope: ScopeBindings,
+  generators: GeneratorRegistrySnapshot,
+): unknown {
   let value: unknown = param
 
   while (doesRequireEvaluation(value)) {
@@ -88,7 +92,7 @@ function renderTemplateSql(fragments: Fragment[], placeholderFormat: Placeholder
           return formatPlaceholder(placeholderFormat, placeholderNumber++)
 
         case 'stringChunk':
-          return fragment.value
+          return fragment.chunk
 
         case 'parameterTuple': {
           if (paramIndex >= params.length) {
@@ -132,10 +136,10 @@ function renderTemplateSql(fragments: Fragment[], placeholderFormat: Placeholder
                   flattenedParams.push(value)
                   return formatPlaceholder(placeholderFormat, placeholderNumber++)
                 })
-                .join(',')
-              return `(${elements})`
+                .join(fragment.itemSeparator)
+              return `${fragment.itemPrefix}${elements}${fragment.itemSuffix}`
             })
-            .join(',')
+            .join(fragment.groupSeparator)
           return tupleList
         }
 
